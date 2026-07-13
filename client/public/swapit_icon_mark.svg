@@ -1,0 +1,15 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>SwapIt mark</title>
+<desc>Fanned playing card stack icon mark for SwapIt, no wordmark, for navbar or app icon use</desc>
+<g transform="translate(230,256) rotate(-14)">
+<rect x="-68" y="-98" width="136" height="196" rx="16" fill="#2f6fed" stroke="#1a1a1a" stroke-width="5"/>
+</g>
+<g transform="translate(286,253) rotate(0)">
+<rect x="-68" y="-98" width="136" height="196" rx="16" fill="#f5b800" stroke="#1a1a1a" stroke-width="5"/>
+</g>
+<g transform="translate(342,256) rotate(14)">
+<rect x="-68" y="-98" width="136" height="196" rx="16" fill="#e8384f" stroke="#1a1a1a" stroke-width="5"/>
+<circle cx="0" cy="0" r="45" fill="#ffffff"/>
+<text x="0" y="16" text-anchor="middle" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#1a1a1a">S</text>
+</g>
+</svg>
