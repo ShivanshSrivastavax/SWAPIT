@@ -2,6 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -17,7 +18,8 @@ const server = createServer(app)
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
 
-app.use(helmet())
+app.use(helmet({ contentSecurityPolicy: false }))
+app.use(compression())
 app.use(cors({ origin: CLIENT_URL, credentials: true }))
 app.use(express.json())
 app.use(cookieParser())

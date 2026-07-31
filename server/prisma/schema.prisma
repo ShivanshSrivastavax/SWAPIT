@@ -8,25 +8,23 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  username      String   @unique
-  email         String   @unique
-  passwordHash  String   @map("password_hash")
-  avatar        String?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  hostedRooms   Room[]         @relation("HostedRooms")
-  roomPlayers   RoomPlayer[]
-  gamePlayers   GamePlayer[]
-  wonGames      Game[]         @relation("GameWinner")
-  messages      Message[]
-  refreshTokens RefreshToken[]
-
+  id               String          @id @default(cuid())
+  username         String          @unique
+  email            String          @unique
+  passwordHash     String          @map("password_hash")
+  avatar           String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
   sentRequests     FriendRequest[] @relation("SentRequests")
   receivedRequests FriendRequest[] @relation("ReceivedRequests")
   friendsA         Friend[]        @relation("FriendA")
   friendsB         Friend[]        @relation("FriendB")
+  gamePlayers      GamePlayer[]
+  wonGames         Game[]          @relation("GameWinner")
+  messages         Message[]
+  refreshTokens    RefreshToken[]
+  roomPlayers      RoomPlayer[]
+  hostedRooms      Room[]          @relation("HostedRooms")
 
   @@map("users")
 }
@@ -35,31 +33,24 @@ model RefreshToken {
   id        String   @id @default(cuid())
   token     String   @unique
   userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
 }
 
-enum RoomStatus {
-  waiting
-  playing
-  finished
-}
-
 model Room {
-  id        String       @id @default(cuid())
-  roomCode  String       @unique @map("room_code")
-  hostId    String       @map("host_id")
-  host      User         @relation("HostedRooms", fields: [hostId], references: [id])
-  status    RoomStatus   @default(waiting)
-  maxPlayers Int         @default(4) @map("max_players")
-  createdAt DateTime     @default(now()) @map("created_at")
-
-  players  RoomPlayer[]
-  games    Game[]
-  messages Message[]
+  id         String       @id @default(cuid())
+  roomCode   String       @unique @map("room_code")
+  hostId     String       @map("host_id")
+  status     RoomStatus   @default(waiting)
+  maxPlayers Int          @default(4) @map("max_players")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  games      Game[]
+  messages   Message[]
+  players    RoomPlayer[]
+  host       User         @relation("HostedRooms", fields: [hostId], references: [id])
 
   @@map("rooms")
 }
@@ -67,31 +58,26 @@ model Room {
 model RoomPlayer {
   id       String   @id @default(cuid())
   roomId   String   @map("room_id")
-  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   userId   String   @map("user_id")
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   isBot    Boolean  @default(false) @map("is_bot")
   botName  String?  @map("bot_name")
   joinedAt DateTime @default(now()) @map("joined_at")
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // NOTE: no unique(roomId, userId) constraint -- bots are stored as rows
-  // that reuse the host's userId as a placeholder FK (isBot distinguishes
-  // them), so uniqueness on that pair can't be a hard DB constraint.
-  // Duplicate-join prevention for real players is handled in application code.
   @@map("room_players")
 }
 
 model Game {
-  id         String    @id @default(cuid())
-  roomId     String    @map("room_id")
-  room       Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  winnerId   String?   @map("winner_id")
-  winner     User?     @relation("GameWinner", fields: [winnerId], references: [id])
-  winnerName String?   @map("winner_name") // used when the winner is a bot (no User row)
-  startedAt  DateTime  @default(now()) @map("started_at")
-  endedAt    DateTime? @map("ended_at")
-
-  players GamePlayer[]
+  id         String       @id @default(cuid())
+  roomId     String       @map("room_id")
+  winnerId   String?      @map("winner_id")
+  winnerName String?      @map("winner_name")
+  startedAt  DateTime     @default(now()) @map("started_at")
+  endedAt    DateTime?    @map("ended_at")
+  players    GamePlayer[]
+  room       Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  winner     User?        @relation("GameWinner", fields: [winnerId], references: [id])
 
   @@map("games")
 }
@@ -99,12 +85,12 @@ model Game {
 model GamePlayer {
   id        String  @id @default(cuid())
   gameId    String  @map("game_id")
-  game      Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
   userId    String  @map("user_id")
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   position  Int
   cardsLeft Int     @map("cards_left")
   isWinner  Boolean @default(false) @map("is_winner")
+  game      Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([gameId, userId])
   @@map("game_players")
@@ -113,29 +99,23 @@ model GamePlayer {
 model Message {
   id        String   @id @default(cuid())
   roomId    String   @map("room_id")
-  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   text      String
   createdAt DateTime @default(now()) @map("created_at")
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("messages")
 }
 
-enum FriendRequestStatus {
-  pending
-  accepted
-  rejected
-}
-
 model FriendRequest {
-  id         String               @id @default(cuid())
-  fromId     String               @map("from_id")
-  from       User                 @relation("SentRequests", fields: [fromId], references: [id], onDelete: Cascade)
-  toId       String               @map("to_id")
-  to         User                 @relation("ReceivedRequests", fields: [toId], references: [id], onDelete: Cascade)
-  status     FriendRequestStatus  @default(pending)
-  createdAt  DateTime             @default(now()) @map("created_at")
+  id        String              @id @default(cuid())
+  fromId    String              @map("from_id")
+  toId      String              @map("to_id")
+  status    FriendRequestStatus @default(pending)
+  createdAt DateTime            @default(now()) @map("created_at")
+  from      User                @relation("SentRequests", fields: [fromId], references: [id], onDelete: Cascade)
+  to        User                @relation("ReceivedRequests", fields: [toId], references: [id], onDelete: Cascade)
 
   @@unique([fromId, toId])
   @@map("friend_requests")
@@ -144,11 +124,23 @@ model FriendRequest {
 model Friend {
   id        String   @id @default(cuid())
   userAId   String   @map("user_a_id")
-  userA     User     @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
   userBId   String   @map("user_b_id")
-  userB     User     @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
+  userA     User     @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
 
   @@unique([userAId, userBId])
   @@map("friends")
+}
+
+enum RoomStatus {
+  waiting
+  playing
+  finished
+}
+
+enum FriendRequestStatus {
+  pending
+  accepted
+  rejected
 }

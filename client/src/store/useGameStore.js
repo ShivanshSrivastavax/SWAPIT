@@ -1,15 +1,10 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 import { getSocket } from '../lib/socket'
+import { sound } from '../utils/soundEffects'
 
 let listenersAttached = false
 
-/**
- * Real-time game store. Room membership and gameplay now go through the
- * Express API (rooms) and Socket.IO (live presence + server-authoritative
- * game state). The server never sends other players' hands -- only counts --
- * so `game.hands[someoneElse]` is a number, not an array, unless it's you.
- */
 export const useGameStore = create((set, get) => ({
   room: null, // { code, hostId, status, players: [{id,name,isBot}] }
   game: null, // sanitized game state from the server (own hand only)
@@ -23,6 +18,7 @@ export const useGameStore = create((set, get) => ({
     const socket = getSocket()
 
     socket.on('playerJoined', ({ room }) => {
+      sound.drawCard()
       set((s) => (s.room && s.room.code === room.code ? { room } : s))
     })
 
@@ -33,13 +29,14 @@ export const useGameStore = create((set, get) => ({
     })
 
     socket.on('gameStarted', ({ game }) => {
+      sound.turnChime()
       set((s) => ({ game, room: s.room ? { ...s.room, status: 'playing' } : s.room }))
     })
 
     socket.on('stateUpdate', ({ game }) => set({ game }))
 
     socket.on('gameEnded', () => {
-      // Final state (with winner set) already arrived via stateUpdate/playCard ack.
+      sound.victory()
     })
 
     socket.on('messageReceived', (msg) => {
@@ -87,7 +84,6 @@ export const useGameStore = create((set, get) => ({
       
       const socket = getSocket()
       
-      // Wait for the gameStarted event to actually set the game state
       const gameStartedHandler = ({ game }) => {
         socket.off('gameStarted', gameStartedHandler)
         resolve(game)
@@ -113,7 +109,7 @@ export const useGameStore = create((set, get) => ({
     socket.emit('sendMessage', { roomCode: room.code, text })
   },
 
-  // ---------- Gameplay (server-authoritative; these just emit and wait for ack) ----------
+  // ---------- Gameplay ----------
   playCard: (playerId, cardId, chosenColor) => {
     const { room } = get()
     if (!room) return
@@ -149,7 +145,6 @@ export const useGameStore = create((set, get) => ({
   },
 }))
 
-// ---------- Stats (fetched from the server; async) ----------
 export async function getLeaderboard() {
   const { leaderboard } = await api.getLeaderboard()
   return leaderboard
