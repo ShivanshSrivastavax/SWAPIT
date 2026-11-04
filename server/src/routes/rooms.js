@@ -1,7 +1,10 @@
+import { randomInt, randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { z } from 'zod'
-import { prisma } from '../lib/prisma.js'
+import { getFirestoreDb } from '../lib/firebase.js'
+import { asyncHandler } from '../lib/asyncHandler.js'
 import { buildBotName } from '../lib/botNames.js'
+import { getRoomByCode, serializeRoom } from '../lib/rooms.js'
 import { requireAuth } from '../middleware/auth.js'
 
 const router = Router()
@@ -10,131 +13,147 @@ router.use(requireAuth)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 function makeRoomCode() {
   let code = ''
-  for (let i = 0; i < 5; i += 1) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]
+  for (let i = 0; i < 5; i += 1) code += CODE_CHARS[randomInt(CODE_CHARS.length)]
   return code
-}
-
-async function uniqueRoomCode() {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const code = makeRoomCode()
-    const exists = await prisma.room.findUnique({ where: { roomCode: code } })
-    if (!exists) return code
-  }
-  throw new Error('Could not generate a unique room code.')
-}
-
-function serializeRoom(room) {
-  return {
-    id: room.id,
-    code: room.roomCode,
-    hostId: room.hostId,
-    status: room.status,
-    maxPlayers: room.maxPlayers,
-    players: room.players.map((p) => ({
-      id: p.isBot ? `bot_${p.id}` : p.userId,
-      name: p.isBot ? p.botName : p.user?.username,
-      isBot: p.isBot,
-    })),
-  }
 }
 
 const createSchema = z.object({
   botCount: z.number().int().min(0).max(3).default(0),
 })
 
-// POST /rooms — create a room, optionally pre-filled with bots
-router.post('/', async (req, res) => {
+async function createUniqueRoom(botCount, user) {
+  const db = getFirestoreDb()
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const roomCode = makeRoomCode()
+    const roomRef = db.collection('rooms').doc()
+    const codeRef = db.collection('roomCodes').doc(roomCode)
+    const players = [{
+      userId: user.id,
+      name: user.username,
+      isBot: false,
+    }]
+    const existingNames = [user.username]
+
+    for (let i = 0; i < botCount; i += 1) {
+      const botName = buildBotName(i, existingNames)
+      existingNames.push(botName)
+      players.push({
+        id: `bot_${randomUUID()}`,
+        userId: user.id,
+        name: botName,
+        botName,
+        isBot: true,
+      })
+    }
+
+    const created = await db.runTransaction(async (transaction) => {
+      const codeSnapshot = await transaction.get(codeRef)
+      if (codeSnapshot.exists) return false
+
+      const room = {
+        roomCode,
+        hostId: user.id,
+        status: 'waiting',
+        maxPlayers: 4,
+        createdAt: new Date().toISOString(),
+        players,
+      }
+      transaction.create(codeRef, { roomId: roomRef.id })
+      transaction.create(roomRef, room)
+      return true
+    })
+
+    if (created) return { id: roomRef.id, roomCode, hostId: user.id, status: 'waiting', maxPlayers: 4, players }
+  }
+
+  throw new Error('Could not generate a unique room code.')
+}
+
+router.post('/', asyncHandler(async (req, res) => {
   const parsed = createSchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' })
-  const { botCount } = parsed.data
 
-  const roomCode = await uniqueRoomCode()
-  const room = await prisma.room.create({
-    data: {
-      roomCode,
-      hostId: req.user.id,
-      players: { create: { userId: req.user.id, isBot: false } },
-    },
-    include: { players: { include: { user: true } } },
-  })
+  const room = await createUniqueRoom(parsed.data.botCount, req.user)
+  res.status(201).json({ room: serializeRoom(room) })
+}))
 
-  const existingNames = room.players?.map((player) => player.user?.username).filter(Boolean) ?? []
-
-  // Bots are represented as room_players rows tied to the host account but
-  // flagged isBot so the client can render them without needing real users.
-  for (let i = 0; i < botCount; i += 1) {
-    await prisma.roomPlayer.create({
-      data: {
-        roomId: room.id,
-        userId: req.user.id, // placeholder FK; isBot flag is what the UI uses
-        isBot: true,
-        botName: buildBotName(i, existingNames),
-      },
-    })
-  }
-
-  const full = await prisma.room.findUnique({ where: { id: room.id }, include: { players: { include: { user: true } } } })
-  res.status(201).json({ room: serializeRoom(full) })
-})
-
-// GET /rooms — list open rooms
-router.get('/', async (req, res) => {
-  const rooms = await prisma.room.findMany({
-    where: { status: 'waiting' },
-    include: { players: { include: { user: true } } },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-  })
+router.get('/', asyncHandler(async (req, res) => {
+  const snapshot = await getFirestoreDb()
+    .collection('rooms')
+    .where('status', '==', 'waiting')
+    .orderBy('createdAt', 'desc')
+    .limit(50)
+    .get()
+  const rooms = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
   res.json({ rooms: rooms.map(serializeRoom) })
-})
+}))
 
-// GET /rooms/:code — room details + players (lookup by room code)
-router.get('/:code', async (req, res) => {
-  const room = await prisma.room.findUnique({
-    where: { roomCode: req.params.code.toUpperCase() },
-    include: { players: { include: { user: true } } },
-  })
+router.get('/:code', asyncHandler(async (req, res) => {
+  const room = await getRoomByCode(req.params.code)
   if (!room) return res.status(404).json({ error: 'Room not found.' })
   res.json({ room: serializeRoom(room) })
-})
+}))
 
-// POST /rooms/:code/join
-router.post('/:code/join', async (req, res) => {
-  const room = await prisma.room.findUnique({
-    where: { roomCode: req.params.code.toUpperCase() },
-    include: { players: true },
+router.post('/:code/join', asyncHandler(async (req, res) => {
+  const db = getFirestoreDb()
+  const roomCode = req.params.code.toUpperCase()
+  const codeRef = db.collection('roomCodes').doc(roomCode)
+  const outcome = await db.runTransaction(async (transaction) => {
+    const codeSnapshot = await transaction.get(codeRef)
+    if (!codeSnapshot.exists) return { missing: true }
+
+    const roomRef = db.collection('rooms').doc(codeSnapshot.data().roomId)
+    const roomSnapshot = await transaction.get(roomRef)
+    if (!roomSnapshot.exists) return { missing: true }
+
+    const room = { id: roomSnapshot.id, ...roomSnapshot.data() }
+    if (room.status !== 'waiting') return { conflict: 'This room has already started.' }
+
+    const alreadyIn = room.players.some((player) => !player.isBot && player.userId === req.user.id)
+    if (!alreadyIn && room.players.length >= room.maxPlayers) return { conflict: 'Room is full.' }
+    if (!alreadyIn) {
+      room.players.push({ userId: req.user.id, name: req.user.username, isBot: false })
+      transaction.update(roomRef, { players: room.players })
+    }
+
+    return { room }
   })
-  if (!room) return res.status(404).json({ error: 'Room not found.' })
-  if (room.status !== 'waiting') return res.status(409).json({ error: 'This room has already started.' })
-  if (room.players.length >= room.maxPlayers) return res.status(409).json({ error: 'Room is full.' })
 
-  const alreadyIn = room.players.some((p) => !p.isBot && p.userId === req.user.id)
-  if (!alreadyIn) {
-    await prisma.roomPlayer.create({ data: { roomId: room.id, userId: req.user.id, isBot: false } })
-  }
+  if (outcome.missing) return res.status(404).json({ error: 'Room not found.' })
+  if (outcome.conflict) return res.status(409).json({ error: outcome.conflict })
+  res.json({ room: serializeRoom(outcome.room) })
+}))
 
-  const full = await prisma.room.findUnique({ where: { id: room.id }, include: { players: { include: { user: true } } } })
-  res.json({ room: serializeRoom(full) })
-})
+router.post('/:code/leave', asyncHandler(async (req, res) => {
+  const db = getFirestoreDb()
+  const roomCode = req.params.code.toUpperCase()
+  const codeRef = db.collection('roomCodes').doc(roomCode)
+  const outcome = await db.runTransaction(async (transaction) => {
+    const codeSnapshot = await transaction.get(codeRef)
+    if (!codeSnapshot.exists) return { missing: true }
 
-// POST /rooms/:code/leave
-router.post('/:code/leave', async (req, res) => {
-  const room = await prisma.room.findUnique({ where: { roomCode: req.params.code.toUpperCase() }, include: { players: true } })
-  if (!room) return res.status(404).json({ error: 'Room not found.' })
+    const roomRef = db.collection('rooms').doc(codeSnapshot.data().roomId)
+    const roomSnapshot = await transaction.get(roomRef)
+    if (!roomSnapshot.exists) return { missing: true }
 
-  await prisma.roomPlayer.deleteMany({ where: { roomId: room.id, userId: req.user.id, isBot: false } })
+    const room = { id: roomSnapshot.id, ...roomSnapshot.data() }
+    const remaining = room.players.filter((player) => player.isBot || player.userId !== req.user.id)
+    const remainingHumans = remaining.filter((player) => !player.isBot)
+    if (remainingHumans.length === 0) {
+      transaction.delete(roomRef)
+      transaction.delete(codeRef)
+      return { deleted: true }
+    }
 
-  const remaining = await prisma.roomPlayer.findMany({ where: { roomId: room.id, isBot: false } })
-  if (remaining.length === 0) {
-    await prisma.room.delete({ where: { id: room.id } }).catch(() => {})
-    return res.status(204).end()
-  }
+    const updates = { players: remaining }
+    if (room.hostId === req.user.id) updates.hostId = remainingHumans[0].userId
+    transaction.update(roomRef, updates)
+    return { deleted: false }
+  })
 
-  // Reassign host if the host left
-  if (room.hostId === req.user.id) {
-    await prisma.room.update({ where: { id: room.id }, data: { hostId: remaining[0].userId } })
-  }
+  if (outcome.missing) return res.status(404).json({ error: 'Room not found.' })
   res.status(204).end()
-})
+}))
 
 export default router

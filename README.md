@@ -3,15 +3,18 @@
 # 🎴 SWAPIT — Real-Time Multiplayer UNO Online
 
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB?style=for-the-badge&logo=react)](https://reactjs.org/)
-[![TailwindCSS](https://img.shields.io/badge/Styling-Tailwind%20CSS-06B6D4?style=for-the-badge&logo=tailwindcss)](https://tailwindcss.com/)
-[![Express](https://img.shields.io/badge/Backend-Express.js-000000?style=for-the-badge&logo=express)](https://expressjs.com/)
+[![Firebase](https://img.shields.io/badge/Auth%20%26%20Data-Firebase-FFCA28?style=for-the-badge&logo=firebase)](https://firebase.google.com/)
 [![Socket.IO](https://img.shields.io/badge/Realtime-Socket.IO-010101?style=for-the-badge&logo=socketdotio)](https://socket.io/)
-[![Prisma](https://img.shields.io/badge/ORM-Prisma%205-2D3748?style=for-the-badge&logo=prisma)](https://www.prisma.io/)
-[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)
 
-An ultra-modern, full-stack, real-time multiplayer **UNO (SwapIt)** web application built with a **3D Casino Oval Felt Table UI**, **Server-Authoritative Game Engine**, **Zero-Latency Web Audio Synthesizer**, and **PostgreSQL persistence**.
+A full-stack real-time multiplayer UNO game with Firebase Authentication, Firestore persistence, and a server-authoritative Socket.IO game engine.
 
-[Highlights](#-highlights--features) • [Quick Start](#-quick-start-local-development) • [Project Structure](#-project-structure) • [Architecture](#%EF%B8%8F-architecture--engine-details) • [Tech Stack](#%EF%B8%8F-tech-stack)
+[Highlights](#-highlights--features) • [Quick Start](#-quick-start-local-development) • [Architecture](#-architecture)
+
+## Live Demo
+
+- **Website:** [https://swapits.web.app](https://swapits.web.app)
+- **Backend API:** [https://swapit-backend-109681970402.asia-southeast1.run.app](https://swapit-backend-109681970402.asia-southeast1.run.app)
+- **Backend health:** [https://swapit-backend-109681970402.asia-southeast1.run.app/health](https://swapit-backend-109681970402.asia-southeast1.run.app/health)
 
 </div>
 
@@ -19,127 +22,100 @@ An ultra-modern, full-stack, real-time multiplayer **UNO (SwapIt)** web applicat
 
 ## 🌟 Highlights & Features
 
-### 🎨 Modern 3D Casino Glassmorphism UI
-- **3D Casino Felt Oval Table**: Realistic poker-table canvas with rich metallic trim, stacked card deck physics, active turn spotlights, and card fanning.
-- **Dark Glassmorphism**: Premium frosted-glass cards, neon accent highlights, and smooth 60fps GPU-accelerated micro-animations.
-- **Native Web Audio Synthesizer**: Zero-network-delay audio engine using browser-native Web Audio API for card flips, deal slides, turn chimes, UNO alerts, and victory fanfares.
-
-### 🛡️ Server-Authoritative & Cheat-Proof Engine
-- **Full Ruleset**: Skip, Reverse, Draw Two, Wild, Wild +4, UNO declaration, missed UNO catching, and draw stacking penalties.
-- **Privacy & Security**: Clients only receive their own hand. Opponent hands are transmitted as card counts, preventing client-side inspection or memory hacking.
-- **Competitive AI Bots**: Fill empty room slots with intelligent AI bots (0–3) that make automated tactical moves with human-like delays.
-
-### 🔐 Full Authentication & Real-Time Presence
-- **JWT & HTTP-Only Cookies**: Real registration/login with bcrypt password hashing, short-lived JWT access tokens, and httpOnly refresh tokens.
-- **Live Room Management**: Create, join, or leave custom rooms with room codes.
-- **In-Game Chat & Presence**: Live presence indicators and real-time chat powered by Socket.IO.
-- **Leaderboards & Match History**: Wins, games played, win rate, and game history persisted directly to PostgreSQL.
-
----
-
-## 📂 Project Structure
-
-```
-uno-game/
-├── client/                  # React Frontend (Vite + Tailwind CSS + Zustand + Socket.IO)
-│   ├── src/
-│   │   ├── components/      # Glassmorphic UI, Card, Deck, 3D GameBoard, Navbar
-│   │   ├── pages/           # Dashboard, Game, Room creation/join, Leaderboard
-│   │   ├── store/           # Zustand state & real-time Socket handlers
-│   │   └── utils/           # Web Audio Synthesizer & Client Game Rules
-├── server/                  # Express REST API + Socket.IO Game Engine + Prisma ORM
-│   ├── prisma/              # Database Schema & Migrations (PostgreSQL)
-│   └── src/
-│       ├── game/            # Pure functional game engine (deck, gameLogic, bots)
-│       ├── routes/          # Auth, Profile, Room, and Leaderboard API endpoints
-│       └── sockets/         # Real-time state manager & room handlers
-└── docker-compose.yml       # Docker Compose setup for local database
-```
-
----
+- **Firebase Authentication**: Email/password sign-up and login, including username-based login.
+- **Firestore persistence**: User profiles, unique usernames, rooms, match history, and leaderboard statistics.
+- **Server-authoritative gameplay**: The Socket.IO server validates game actions and only sends each player their own cards.
+- **Full UNO ruleset**: Skip, Reverse, Draw Two, Wild, Wild +4, UNO declaration, missed UNO catches, and bots.
+- **Live multiplayer**: Room creation/joining, presence, and in-game chat.
 
 ## ⚡ Quick Start (Local Development)
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
-- [PostgreSQL](https://www.postgresql.org/) database or [Docker](https://www.docker.com/)
 
----
+- Node.js 20+
+- A Firebase project with **Email/Password Authentication** enabled and **Cloud Firestore** created
+- A Firebase web app configuration
+- A Firebase service-account JSON file for the Express server (keep it outside the repository)
 
-### 1. Database Setup
+### 1. Configure Firebase
 
-Using **Docker**:
-```bash
-docker compose up -d postgres
+In Firebase Console:
+
+1. Enable **Authentication → Sign-in method → Email/Password**.
+2. Create a **Cloud Firestore** database.
+3. Register a web app and copy its config values into `client/.env`.
+4. Create/download a service-account key and set its file path in `server/.env`. Never commit this key.
+5. Deploy the Firestore rules and index (`firestore.rules` and `firestore.indexes.json`) from the Firebase Console or with the Firebase CLI.
+
+Copy the templates and fill in the values:
+
+```powershell
+Copy-Item client/.env.example client/.env
+Copy-Item server/.env.example server/.env
 ```
-*Or set `DATABASE_URL` in `server/.env` to point to any PostgreSQL database (Supabase, Neon, Railway).*
 
----
+Set these client variables from the Firebase web app config:
 
-### 2. Backend Setup (`server`)
+```dotenv
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_APP_ID=
+```
 
-Open a terminal and run:
+Set these server variables:
 
-```bash
-cd server
+```dotenv
+FIREBASE_PROJECT_ID=
+GOOGLE_APPLICATION_CREDENTIALS=
+```
 
-# Copy environment template
-cp .env.example .env
+`GOOGLE_APPLICATION_CREDENTIALS` must point to the downloaded service-account JSON. The Admin SDK uses it for Firebase Authentication and Firestore access.
 
-# Install dependencies
+For Docker Compose, place the key at `server/firebase-service-account.json` (ignored by git), or set `FIREBASE_SERVICE_ACCOUNT_FILE` to its path before starting Compose.
+
+### 2. Start the backend
+
+```powershell
+Set-Location server
 npm install
-
-# Push database schema & generate Prisma client
-npx prisma generate
-npx prisma db push
-
-# Start backend server (runs on http://localhost:4000)
 npm run dev
 ```
 
----
+The API and Socket.IO server run on http://localhost:4100.
 
-### 3. Frontend Setup (`client`)
+### 3. Start the frontend
 
-Open a separate terminal and run:
+In another terminal:
 
-```bash
-cd client
-
-# Copy environment template
-cp .env.example .env
-
-# Install dependencies
+```powershell
+Set-Location client
 npm install
-
-# Start Vite dev server (runs on http://localhost:5173)
 npm run dev
 ```
 
-> **🎮 Test Multiplayer locally:** Open `http://localhost:5173/` in two separate browser windows (or one normal + one incognito), register two users, create a room in one, join with the room code in the other, and play in real time!
+Open http://localhost:4173.
 
----
+## 🔐 Firestore Security
+
+The application accesses Firestore through the Firebase Admin SDK on the server. Client-side database access is not needed; `firestore.rules` denies direct client reads and writes. Keep service-account keys out of source control and restrict access to the Firebase project.
+
+## 🏗️ Architecture
+
+- The React client uses Firebase Authentication for identity and sends Firebase ID tokens to the Express API and Socket.IO server.
+- Express verifies tokens with the Firebase Admin SDK and stores user profiles, username indexes, rooms, match results, and statistics in Firestore.
+- Socket.IO authenticates each connection and keeps the UNO game state server-side in memory.
+- The frontend does not access Firestore directly.
+
+### Existing accounts
+
+Firebase Authentication is a separate identity store. Existing PostgreSQL/Supabase users and password hashes are not automatically copied; users must create accounts in the configured Firebase project unless a separate user-data migration is performed.
 
 ## 🛠️ Tech Stack
 
-| Layer | Technologies Used |
+| Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 18, Vite, Tailwind CSS, Zustand, Socket.IO Client |
-| **Audio** | Native Web Audio API (Synthesized SFX & Fanfares) |
-| **Backend** | Node.js, Express.js, Socket.IO, Compression |
-| **Database & ORM** | PostgreSQL, Prisma ORM 5 |
-| **Auth & Security** | JWT, bcrypt, Cookie-Parser, Helmet |
-
----
-
-## 🏗️ Architecture & Engine Details
-
-1. **Server-Authoritative Loop**: Game state resides in-memory on the server (`server/src/sockets/gameManager.js`). Client actions (`playCard`, `drawCard`, `declareUno`, `catchMissedUno`) are validated on the server before state broadcasts.
-2. **Read-Only Client Engine**: The client keeps a pure copy of rule utilities (`client/src/utils/gameLogic.js`) strictly for optimistic UI driving (highlighting playable cards) without blocking network round-trips.
-3. **Authenticated WebSockets**: Sockets authenticate via JWT token handshakes (`socket.handshake.auth.token`) ensuring room connections map to verified user accounts.
-
----
-
-<div align="center">
-  <sub>Built with ❤️ by Shivansh Srivastava</sub>
-</div>
+| **Frontend** | React 18, Vite, Tailwind CSS, Zustand |
+| **Authentication & data** | Firebase Authentication, Cloud Firestore, Firebase Admin SDK |
+| **Backend** | Node.js, Express.js, Socket.IO |
+| **Audio** | Web Audio API |

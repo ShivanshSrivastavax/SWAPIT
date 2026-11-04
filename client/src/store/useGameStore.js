@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { getSocket } from '../lib/socket'
 import { sound } from '../utils/soundEffects'
 
-let listenersAttached = false
+let listenersAttachedTo = null
 
 export const useGameStore = create((set, get) => ({
   room: null, // { code, hostId, status, players: [{id,name,isBot}] }
@@ -13,9 +13,9 @@ export const useGameStore = create((set, get) => ({
 
   /** Attach Socket.IO listeners once per session. Safe to call repeatedly. */
   _ensureListeners: () => {
-    if (listenersAttached) return
-    listenersAttached = true
     const socket = getSocket()
+    if (listenersAttachedTo === socket) return
+    listenersAttachedTo = socket
 
     socket.on('playerJoined', ({ room }) => {
       sound.drawCard()

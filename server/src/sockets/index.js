@@ -1,63 +1,71 @@
-import { verifyAccessToken } from '../lib/tokens.js'
-import { prisma } from '../lib/prisma.js'
+import { getAdminAuth, getFirestoreDb } from '../lib/firebase.js'
+import { getRoomByCode, serializeRoom, setRoomStatus } from '../lib/rooms.js'
 import * as gm from './gameManager.js'
 
-function serializeRoom(room) {
-  return {
-    id: room.id,
-    code: room.roomCode,
-    hostId: room.hostId,
-    status: room.status,
-    maxPlayers: room.maxPlayers,
-    players: room.players.map((p) => ({
-      id: p.isBot ? `bot_${p.id}` : p.userId,
-      name: p.isBot ? p.botName : p.user?.username,
-      isBot: p.isBot,
-    })),
-  }
-}
-
 async function recordResult(room, finishedGame) {
+  const db = getFirestoreDb()
+  const gameRef = db.collection('games').doc()
+  const roomRef = db.collection('rooms').doc(room.id)
+  const humanPlayers = finishedGame.players.filter((p) => !p.isBot)
+  const profileRefs = humanPlayers.map((player) => db.collection('users').doc(player.id))
+  const winnerPlayer = finishedGame.players.find((player) => player.id === finishedGame.winner)
   const winnerIsHuman = !String(finishedGame.winner).startsWith('bot_')
-  const winnerPlayer = finishedGame.players.find((p) => p.id === finishedGame.winner)
-  const game = await prisma.game.create({
-    data: {
-      roomId: room.id,
+
+  await db.runTransaction(async (transaction) => {
+    const [existingGame, roomSnapshot, ...profileSnapshots] = await Promise.all([
+      transaction.get(gameRef),
+      transaction.get(roomRef),
+      ...profileRefs.map((ref) => transaction.get(ref)),
+    ])
+    if (existingGame.exists || !roomSnapshot.exists || roomSnapshot.data().status === 'finished') return
+
+    const endedAt = new Date().toISOString()
+    const players = humanPlayers.map((player) => ({
+      id: player.id,
+      name: player.name,
+      cardsLeft: finishedGame.hands[player.id]?.length ?? 0,
+    }))
+    const game = {
+      id: gameRef.id,
+      roomCode: room.roomCode,
+      winner: winnerPlayer?.name ?? 'Unknown',
       winnerId: winnerIsHuman ? finishedGame.winner : null,
       winnerName: winnerIsHuman ? null : winnerPlayer?.name ?? null,
-      endedAt: new Date(),
-    },
+      endedAt,
+      players,
+      playerIds: humanPlayers.map((player) => player.id),
+    }
+
+    transaction.create(gameRef, game)
+    transaction.update(roomRef, { status: 'finished' })
+
+    humanPlayers.forEach((player, index) => {
+      const profileSnapshot = profileSnapshots[index]
+      if (!profileSnapshot.exists) return
+
+      const profile = profileSnapshot.data()
+      const isWinner = player.id === finishedGame.winner
+      transaction.set(profileRefs[index], {
+        gamesPlayed: (profile.gamesPlayed ?? 0) + 1,
+        wins: (profile.wins ?? 0) + (isWinner ? 1 : 0),
+      }, { merge: true })
+      transaction.create(profileRefs[index].collection('history').doc(gameRef.id), game)
+    })
   })
-
-  const humanPlayers = finishedGame.players.filter((p) => !p.isBot)
-  await Promise.all(
-    humanPlayers.map((p, i) =>
-      prisma.gamePlayer.create({
-        data: {
-          gameId: game.id,
-          userId: p.id,
-          position: i,
-          cardsLeft: finishedGame.hands[p.id]?.length ?? 0,
-          isWinner: p.id === finishedGame.winner,
-        },
-      })
-    )
-  )
-
-  await prisma.room.update({ where: { id: room.id }, data: { status: 'finished' } })
 }
 
 export function registerSocketHandlers(io) {
-  // Authenticate every socket connection using the JWT access token.
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token
       if (!token) return next(new Error('Missing auth token.'))
-      const payload = verifyAccessToken(token)
-      socket.user = { id: payload.sub, username: payload.username }
+      const decoded = await getAdminAuth().verifyIdToken(token)
+      const profile = await getFirestoreDb().collection('users').doc(decoded.uid).get()
+      if (!profile.exists) return next(new Error('Account profile not found.'))
+      socket.user = { id: decoded.uid, username: profile.data().username }
       next()
     } catch {
-      next(new Error('Invalid or expired token.'))
+      next(new Error('Invalid or expired Firebase ID token.'))
     }
   })
 
@@ -66,10 +74,7 @@ export function registerSocketHandlers(io) {
 
     socket.on('joinRoom', async ({ roomCode }, ack) => {
       try {
-        const room = await prisma.room.findUnique({
-          where: { roomCode: roomCode.toUpperCase() },
-          include: { players: { include: { user: true } } },
-        })
+        const room = await getRoomByCode(roomCode)
         if (!room) return ack?.({ error: 'Room not found.' })
 
         currentRoomCode = room.roomCode
@@ -90,21 +95,18 @@ export function registerSocketHandlers(io) {
 
     socket.on('startGame', async ({ roomCode }, ack) => {
       try {
-        const room = await prisma.room.findUnique({
-          where: { roomCode: roomCode.toUpperCase() },
-          include: { players: { include: { user: true } } },
-        })
+        const room = await getRoomByCode(roomCode)
         if (!room) return ack?.({ error: 'Room not found.' })
         if (room.hostId !== socket.user.id) return ack?.({ error: 'Only the host can start the game.' })
 
-        const players = room.players.map((p) => ({
-          id: p.isBot ? `bot_${p.id}` : p.userId,
-          name: p.isBot ? p.botName : p.user?.username,
-          isBot: p.isBot,
+        const players = room.players.map((player) => ({
+          id: player.isBot ? player.id : player.userId,
+          name: player.name,
+          isBot: player.isBot,
         }))
 
         const game = gm.startGame(room.roomCode, players)
-        await prisma.room.update({ where: { id: room.id }, data: { status: 'playing' } })
+        await setRoomStatus(room.id, 'playing')
 
         // Each socket in the room gets a view with only their own hand visible.
         const sockets = await io.in(room.roomCode).fetchSockets()
@@ -131,14 +133,14 @@ export function registerSocketHandlers(io) {
         ack?.({ ok: true })
 
         if (next.status === 'finished') {
-          const room = await prisma.room.findUnique({ where: { roomCode } })
+          const room = await getRoomByCode(roomCode)
           if (room) await finishGame(io, room, next)
         } else {
           gm.runBotTurns(
             roomCode,
             (updated) => broadcastState(io, roomCode, updated),
             async (finished) => {
-              const room = await prisma.room.findUnique({ where: { roomCode } })
+              const room = await getRoomByCode(roomCode)
               if (room) await finishGame(io, room, finished)
             }
           )
@@ -158,7 +160,7 @@ export function registerSocketHandlers(io) {
           roomCode,
           (updated) => broadcastState(io, roomCode, updated),
           async (finished) => {
-            const room = await prisma.room.findUnique({ where: { roomCode } })
+            const room = await getRoomByCode(roomCode)
             if (room) await finishGame(io, room, finished)
           }
         )

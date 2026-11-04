@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { isFirebaseConfigured } from '../lib/firebase'
 import { useAuthStore } from '../store/useAuthStore'
 
 export default function Register() {
@@ -41,6 +42,11 @@ export default function Register() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 bg-felt-dark/50 border border-cream/10 rounded-2xl p-6">
+          {!isFirebaseConfigured && (
+            <p className="text-sm bg-card-yellow/10 border border-card-yellow/40 text-cream rounded-lg px-3 py-2">
+              Firebase is not configured yet. Add the Firebase web app settings to client/.env.
+            </p>
+          )}
           {error && (
             <p className="text-sm bg-card-red/20 border border-card-red/40 text-cream rounded-lg px-3 py-2">
               {error}

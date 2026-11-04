@@ -1,37 +1,13 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: uno
-      POSTGRES_PASSWORD: uno
-      POSTGRES_DB: uno_game
-    ports:
-      - '5432:5432'
-    volumes:
-      - uno_pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U uno']
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   server:
     build: ./server
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+    env_file: ./server/.env
     environment:
-      DATABASE_URL: postgresql://uno:uno@postgres:5432/uno_game?schema=public
-      JWT_SECRET: change-me-access-secret
-      JWT_REFRESH_SECRET: change-me-refresh-secret
-      JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_EXPIRES_IN: 30d
-      PORT: 4000
-      CLIENT_URL: http://localhost:5173
+      PORT: 4100
+      CLIENT_URL: http://localhost:4173
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
+    volumes:
+      - ${FIREBASE_SERVICE_ACCOUNT_FILE:-./server/firebase-service-account.json}:/run/secrets/firebase-service-account.json:ro
     ports:
-      - '4000:4000'
-
-volumes:
-  uno_pgdata:
+      - '4100:4100'

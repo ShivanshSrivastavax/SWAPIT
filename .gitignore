@@ -5,6 +5,7 @@ node_modules/
 # Build output
 dist/
 build/
+.firebase/
 
 # Environment variables
 .env
@@ -18,5 +19,6 @@ npm-debug.log*
 # OS files
 .DS_Store
 
-# Prisma
-server/prisma/migrations/dev.db
+# Firebase service account keys
+*firebase-adminsdk*.json
+*service-account*.json

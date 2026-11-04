@@ -1,46 +1,85 @@
+import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { create } from 'zustand'
-import { api, setAccessToken } from '../lib/api'
-import { disconnectSocket } from '../lib/socket'
+import { api } from '../lib/api'
+import { auth, requireFirebaseAuth } from '../lib/firebase'
+import { disconnectSocket, watchSocketAuth } from '../lib/socket'
 
-export const useAuthStore = create((set, get) => ({
+let stopWatchingAuth = null
+
+export const useAuthStore = create((set) => ({
   user: null,
-  status: 'idle', // idle | loading | ready
+  status: 'idle',
 
-  /** Try to restore a session on app load using the httpOnly refresh cookie. */
-  bootstrap: async () => {
-    set({ status: 'loading' })
-    try {
-      const { accessToken, user } = await api.refresh()
-      setAccessToken(accessToken)
-      set({ user, status: 'ready' })
-    } catch {
+  bootstrap: () => {
+    if (stopWatchingAuth) return
+    if (!auth) {
       set({ user: null, status: 'ready' })
+      return
     }
+
+    set({ status: 'loading' })
+    watchSocketAuth()
+    stopWatchingAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        set({ user: null, status: 'ready' })
+        return
+      }
+
+      try {
+        const { user } = await api.me()
+        set({ user, status: 'ready' })
+      } catch {
+        set({ user: null, status: 'ready' })
+      }
+    })
   },
 
   register: async (username, email, password) => {
-    const { accessToken, user } = await api.register(username, email, password)
-    setAccessToken(accessToken)
-    set({ user })
-    return user
+    const firebaseAuth = requireFirebaseAuth()
+    let firebaseUser
+    let createdForThisAttempt = true
+    try {
+      firebaseUser = (await createUserWithEmailAndPassword(firebaseAuth, email, password)).user
+    } catch (error) {
+      if (error.code !== 'auth/email-already-in-use') throw error
+
+      firebaseUser = (await signInWithEmailAndPassword(firebaseAuth, email, password)).user
+      createdForThisAttempt = false
+      try {
+        const { user } = await api.me()
+        await signOut(firebaseAuth)
+        throw new Error(`Account ${user.email} is already registered. Please log in.`)
+      } catch (profileError) {
+        if (profileError.status !== 403) throw profileError
+      }
+    }
+
+    try {
+      const { user } = await api.register(username)
+      set({ user, status: 'ready' })
+      return user
+    } catch (error) {
+      if (error.status === 409 && createdForThisAttempt) await deleteUser(firebaseUser)
+      await signOut(firebaseAuth)
+      throw error
+    }
   },
 
   login: async (identifier, password) => {
-    const { accessToken, user } = await api.login(identifier, password)
-    setAccessToken(accessToken)
-    set({ user })
+    const firebaseAuth = requireFirebaseAuth()
+    const email = identifier.includes('@')
+      ? identifier.trim().toLowerCase()
+      : (await api.resolveLogin(identifier)).email
+    await signInWithEmailAndPassword(firebaseAuth, email, password)
+    const { user } = await api.me()
+    set({ user, status: 'ready' })
     return user
   },
 
   logout: async () => {
-    try {
-      await api.logout()
-    } catch {
-      // best-effort -- clear local state regardless
-    }
-    setAccessToken(null)
+    if (auth) await signOut(auth)
     disconnectSocket()
-    set({ user: null })
+    set({ user: null, status: 'ready' })
   },
 
   updateProfile: async (updates) => {
